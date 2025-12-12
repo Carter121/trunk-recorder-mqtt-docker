@@ -1,9 +1,8 @@
 ###############################################################################
-# Stage 1 – compile trunk-recorder + SoapyPlutoPAPR (builder image)           #
+# Stage 1 – compile trunk-recorder                                            #
 ###############################################################################
-FROM ubuntu:noble-20251001 AS builder
+FROM ubuntu:24.04 AS builder
 
-ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get -y upgrade && \
     apt-get install --no-install-recommends -y \
     # ── toolchain ────────────────────────────────────────────────────────────
@@ -12,21 +11,15 @@ RUN apt-get update && apt-get -y upgrade && \
         ffmpeg gnuradio-dev gr-osmosdr libosmosdr-dev \
         libairspy-dev libairspyhf-dev libbladerf-dev libfreesrp-dev \
         libhackrf-dev libmirisdr-dev libuhd-dev libxtrx-dev librtlsdr-dev \
-        libsoapysdr-dev \
     # ── generic libs ────────────────────────────────────────────────────────
         libboost-all-dev libcurl4-openssl-dev libgmp-dev liborc-0.4-dev \
         libpaho-mqtt-dev libpaho-mqttpp-dev libpthread-stubs0-dev libsndfile1-dev \
         libssl-dev python3-six openssh-client ca-certificates \
-    # ── extra deps for SoapyPlutoPAPR ────────────────────────────────────────
-        libiio-dev libad9361-dev libserialport-dev flex bison libxml2-dev soapysdr-tools \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
 # ───────────────────────── trunk-recorder (core) ─────────────────────────────
 RUN git clone --depth 1 https://github.com/TrunkRecorder/trunk-recorder.git && \
-    # Re-enable simplestream plugin: it's commented out in upstream CMake
-    sed -i 's/^[[:space:]]*#\s*add_subdirectory(plugins\/simplestream)/add_subdirectory(plugins\/simplestream)/' \
-        trunk-recorder/CMakeLists.txt && \
     mkdir -p trunk-recorder/build
 
 # MQTT plugin
@@ -38,22 +31,11 @@ RUN cmake .. \
  && make -j"$(nproc)" \
  && make DESTDIR=/newroot install      # staged for the final image
 
-# ───────────────────────── SoapyPlutoPAPR driver ────────────────────────────
-RUN cd /tmp && \
-    git clone --depth 1 https://github.com/F5OEO/SoapyPlutoPAPR.git && \
-    cmake -S SoapyPlutoPAPR -B SoapyPlutoPAPR/build \
-          -DCMAKE_INSTALL_PREFIX=/usr \
-          -DCMAKE_INSTALL_LIBDIR=lib/x86_64-linux-gnu && \
-    cmake --build SoapyPlutoPAPR/build -- -j"$(nproc)" && \
-    DESTDIR=/newroot cmake --install SoapyPlutoPAPR/build && \
-    rm -rf SoapyPlutoPAPR
-
 ###############################################################################
 # Stage 2 – lightweight runtime image                                         #
 ###############################################################################
-FROM ubuntu:noble-20251001
+FROM ubuntu:24.04
 
-ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get -y upgrade && \
     apt-get install --no-install-recommends -y \
     # ── trunk-recorder runtime deps ──────────────────────────────────────────
@@ -64,11 +46,6 @@ RUN apt-get update && apt-get -y upgrade && \
         libgnuradio-osmosdr0.2.0t64 libgnuradio-uhd3.10.9t64 \
         libpaho-mqtt-dev libpaho-mqttpp-dev \
         libairspyhf1 libfreesrp0 librtlsdr2 libxtrx0 \
-        libsoapysdr0.8 \
-        # NOTE: we intentionally **skip** Ubuntu’s plutosdr module
-        # libsoapysdr0.8-module-all \
-    # ── run-time deps for SoapyPlutoPAPR ─────────────────────────────────────
-        libiio0 libad9361-0 \
     && rm -rf /var/lib/apt/lists/* \
     && rm -rf /usr/share/{doc,man,info} /usr/local/share/{doc,man,info}
 
